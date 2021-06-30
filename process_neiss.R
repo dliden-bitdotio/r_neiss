@@ -114,7 +114,7 @@ process_neiss_data <- function(data, codelists) {
     labeled_data$Sex = case_when(labeled_data$Sex == 0 ~ "Not Recorded",
                                  labeled_data$Sex == 1 ~ "Male",
                                  labeled_data$Sex == 2 ~ "Female")
-    labeled_data$Age[labeled_Data$Age > 200] <-
+    labeled_data$Age[labeled_data$Age > 200] <-
         (labeled_data$Age[labeled_data$Age > 200] - 200) / 12
 
     labeled_data$Narrative[is.na(labeled_data$Narrative)] =
