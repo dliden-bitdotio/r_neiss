@@ -39,8 +39,12 @@ vignettes/*.pdf
 .Renviron
 
 # Data
+*.parquet
 *.csv
 *.xlsx
 
 # Mac
 .DS_Store
+
+# images
+*.png

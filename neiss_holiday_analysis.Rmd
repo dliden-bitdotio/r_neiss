@@ -1,0 +1,357 @@
+---
+title: "Neiss Holiday Analysis"
+author: "Daniel Liden"
+date: "6/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(DBI)
+library(dbplyr)
+library(lubridate)
+library(tidyverse)
+library(RPostgres)
+library(scales)
+
+GREY = '#788995'
+BLUE = '#0059ff'
+GOLD = '#fdbd28'
+GREEN = '#28D9AA'
+RED = '#EE5149'
+METAL_SUN = '#AD8D40'
+DARK_ORCHID = '#9A34D1'
+MAGENTA = '#8A4859'
+OXFORD = '#121C3B'
+PINK = '#DB9995'
+```
+
+## Accessing the Data on bit.io
+
+```{r}
+con <- dbConnect(RPostgres::Postgres(), dbname = 'bitdotio', 
+                 host = 'db.bit.io',
+                 port = 5432,
+                 user = 'name',
+                 password = Sys.getenv("BITIO_PASS2"))
+
+neiss <- in_schema("bitdotio/neiss", "neiss_2016_2020")
+hd <- in_schema("bitdotio/neiss", "injuries_near_holidays")
+
+neiss_agg_year_hday <- con %>%
+  tbl(neiss) %>%
+  select(CPSC_Case_Number, Treatment_Date, Product_1, Weight) %>%
+  mutate(trt_year = year(Treatment_Date)) %>%
+  inner_join(tbl(con, hd), by="CPSC_Case_Number")%>%
+  group_by(trt_year, holiday_name) %>%
+  summarise(weighted = sum(Weight), n=n()) %>%
+  show_query()
+  
+#write_csv(neiss_agg_year_hday, "./neiss_agg_year_hday.csv")
+```
+
+## Some quick viz for trends over time/by holiday
+
+```{r}
+data <- read.csv("./neiss_agg_year_hday.csv")
+
+by_hday <- data %>%
+  group_by(holiday_name) %>%
+  summarise(weighted = sum(weighted), n=sum(n)) %>%
+  mutate(frac_weighted = weighted/sum(weighted))
+
+by_hday <- add_row(by_hday, holiday_name = "Seven Day Average",
+          weighted = sum(by_hday$weighted), n=sum(by_hday$n),
+          frac_weighted = (weighted/sum(by_hday$weighted))/(365/7)) %>%
+  filter(holiday_name != "Not near a holiday")
+
+
+by_hday$holiday_name[by_hday$holiday_name=="New Years Day"] = "New Year's Day"
+
+neiss <- read.csv("./neiss_data.csv")
+
+ra <- neiss %>%
+  mutate(trt_year = as.factor(year(Treatment_Date)),
+         doy = yday(Treatment_Date)) %>%
+  group_by(doy) %>%
+  summarise(weighted = sum(Weight), n=n())
+by_hday$weighted[by_hday$holiday_name=="Seven Day Average"] = mean(zoo::rollsum(ra$weighted, k = 7))
+
+by_hday
+```
+
+### Most Dangerous Holiday
+
+```{r}
+by_hday$cols = c(RED,GREEN,GOLD, PINK, "orange3", GREY, BLUE)
+by_hday$holiday_name[by_hday$holiday_name=="Seven Day Average"] = "Seven-Day Average"
+by_hday$yearly <- by_hday$weighted/5
+
+fig1 <- ggplot(by_hday) +
+  geom_col(aes(x = reorder(holiday_name, yearly), y = yearly, fill = reorder(cols, yearly)),
+           width = 0.6, alpha=0.8) +
+  geom_col(data=by_hday[(by_hday$holiday_name=="Seven-Day Average"),],        # filter
+           aes(x = holiday_name, y = yearly), alpha=0, size=0.5, color="black", width = 0.6) +                # plot outline only
+  scale_y_continuous(name = "Number of Product-Related Injuries", labels = comma,
+                     n.breaks = 8) +
+  scale_x_discrete(name=NULL, labels = function(x) str_wrap(x, 12)) +
+  scale_fill_manual(values = by_hday$cols) +
+  ggtitle("Independence Day is the Most Dangerous Holiday") +
+  labs(caption = "The seven-day Average is average of all (overlapping) seven-day intervals",
+    #caption = "Source: U.S. Consumer Product Safety Commission National Electronic Injury Surveillance System, 2016-2020",
+       subtitle = "Yearly Mean of Product-Related Incidents within Three Days of Holidays, 2016-2020") +
+  theme_light() +
+  theme(
+    axis.text.x = element_text(size = 5.5, family = "Iosevka Term", face = "bold"),
+    axis.text.y = element_text(size = 6, family = "Iosevka Term", face = "bold"),
+    axis.title = element_text(size = 6, family = "Roboto", face = "bold", color="#8F8F8F"),
+    plot.title = element_text(family="Roboto Slab", size = 10, face="bold"),
+    plot.caption.position = "plot",
+    plot.caption = element_text(hjust = 0.1, family = "Iosevka Term", size=5),
+    plot.subtitle = element_text(family = "Roboto", color="#8F8F8F", face="bold", size = 6),
+    legend.position = "None"
+  )
+fig1
+
+ggsave(filename = "./fig1_most_dangerous_hday_v2.png", dpi=300, width = 4, height=2.5, units = "in", device="png")
+```
+![](./fig1_most_dangerous_hday_v2.png)
+
+## Most Dangerous Implements by Holiday
+
+```{r}
+neiss_agg_year_hday_prod <- con %>%
+  tbl(neiss) %>%
+  mutate(trt_year = year(Treatment_Date)) %>%
+  inner_join(tbl(con, hd), by="CPSC_Case_Number")%>%
+  group_by(trt_year, holiday_name, Product_1) %>%
+  summarise(weighted = sum(Weight), n=n()) %>%
+  slice_max(order_by = weighted, n=20) %>% str_detect(Product_1, "christmas")
+
+%>%
+  collect()
+  
+write_csv(neiss_agg_year_hday_prod, "./neiss_agg_year_hday_prod.csv")
+```
+# Fireworks?
+
+```{r}
+con <- dbConnect(RPostgres::Postgres(), dbname = 'bitdotio', 
+                 host = 'db.bit.io',
+                 port = 5432,
+                 user = 'name',
+                 password = Sys.getenv("BITIO_PASS2"))
+
+neiss <- in_schema("bitdotio/neiss", "neiss_2016_2020")
+hd <- in_schema("bitdotio/neiss", "injuries_near_holidays")
+
+data <- read.csv("./neiss_data.csv")
+
+# format(lubridate::parse_date_time(mymonth, orders = c("m/Y")), "%m-%Y")
+#
+
+neiss_agg_year_prod <- data %>%
+  mutate(trt_year = as.factor(year(Treatment_Date)),
+         doy = yday(Treatment_Date)) %>%
+  group_by(doy, trt_year, Product_1) %>%
+  summarise(weighted = sum(Weight), n=n()) %>%
+  filter(str_detect(Product_1, "FIREWORK"))
+
+labeldata = data.frame(trt_year = levels(neiss_agg_year_prod$trt_year), labels = c("Independence Day", NA, NA, NA, NA))
+
+neiss_agg_year_prod$CommonDate <- as.Date(paste0("2000-", format(neiss_agg_year_prod$doy, format="%j")), "%Y-%j")
+
+ggplot(data = neiss_agg_year_prod,
+       mapping = aes(x = CommonDate, y = weighted, colour = trt_year)) +
+  geom_vline(aes(xintercept = neiss_agg_year_prod$CommonDate[184]), linetype="dotted", color="black") +
+  geom_line(size=1, alpha = 0.8) +
+  geom_text(x=neiss_agg_year_prod$CommonDate[262], y=3300, aes(label=labels), data=labeldata,
+            color = "black", family="Iosevka Term", size=2) +
+  facet_grid(facets = trt_year ~ .) +
+  scale_x_date(labels = function(x) format(x, "%b"), date_breaks = "1 month", expand = c(0,0)) +
+  scale_y_continuous(labels=comma) +
+  scale_color_manual(values = c(RED, BLUE, GOLD, GREEN, PINK)) +
+  ggtitle("Fireworks Injuries per Year") +
+  xlab("Day of Year") +
+  ylab("Number of Fireworks Injuries") +
+  theme_light() +
+  theme(
+    axis.text.x = element_text(size = 7, family = "Iosevka Term", face = "bold"),
+    axis.text.y = element_text(size = 7, family = "Iosevka Term", face = "bold"),
+    axis.title = element_text(size = 8, family = "Roboto", face = "bold", color="#8F8F8F"),
+    plot.title = element_text(family="Roboto Slab", size = 14, face="bold", hjust=0.5),
+    plot.caption.position = "plot",
+    plot.caption = element_text(hjust = 0.1, family = "Iosevka Term", size=5),
+    plot.subtitle = element_text(family = "Roboto", color="#8F8F8F", face="bold", size = 6),
+    legend.position = "None",
+    strip.text = element_text(family="Iosevka Term")
+  )
+
+ggsave(filename = "./fig2_fireworks.png", dpi=300, width = 6, height=4, units = "in", device="png")
+
+```
+
+![](./fig2_fireworks.png)
+
+```{r}
+data <- read.csv("./neiss_data.csv")
+
+# format(lubridate::parse_date_time(mymonth, orders = c("m/Y")), "%m-%Y")
+#
+
+pand <- data %>%
+  mutate(trt_year = as.factor(year(Treatment_Date)),
+         doy = yday(Treatment_Date)) %>%
+  group_by(doy, trt_year) %>%
+  summarise(weighted = sum(Weight), n=n())
+
+pand$CommonDate <- as.Date(paste0("2000-", format(pand$doy, format="%j")), "%Y-%j")
+
+ggplot(data = pand,
+       mapping = aes(x = CommonDate, y = weighted, color = trt_year, fill=trt_year)) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  geom_smooth(size=0.5, alpha = 0.1, method = "gam", span = 1, level = 0.99) +
+  scale_x_date(labels = function(x) format(x, "%b"), date_breaks = "1 month", expand = c(0,0)) +
+  scale_y_continuous(labels = comma) +
+  scale_color_manual(values = c(RED, BLUE, GOLD, GREEN, PINK), name=NULL) +
+  scale_fill_manual(values = c(RED, BLUE, GOLD, GREEN, PINK), name=NULL) +
+  ggtitle("Product-Related Injuries by Year") +
+  xlab("Day of Year") +
+  ylab("Daily Number of Injuries") +
+  labs(caption = "Source: U.S. Consumer Product Safety Commission National Electronic Injury Surveillance System, 2016-2020") +
+  theme_light() +
+  theme(
+    axis.text.x = element_text(size = 7, family = "Iosevka Term", face = "bold"),
+    axis.text.y = element_text(size = 7, family = "Iosevka Term", face = "bold"),
+    axis.title = element_text(size = 8, family = "Roboto", face = "bold", color="#8F8F8F"),
+    plot.title = element_text(family="Roboto Slab", size = 14, face="bold", hjust=0.5),
+    plot.caption.position = "plot",
+    plot.caption = element_text(hjust = 0.1, family = "Iosevka Term", size=7),
+    plot.subtitle = element_text(family = "Roboto", color="#8F8F8F", face="bold", size = 6),
+    legend.title = element_text(family="Roboto Slab", face="bold"),
+    legend.text = element_text(family="Iosevka Term"),
+    legend.position = "bottom")
+
+ggsave(filename = "./fig3_pandemic_r.png", dpi=300, width = 6, height=4, units = "in", device="png")
+
+```
+# Differences
+
+```{r}
+con <- dbConnect(RPostgres::Postgres(), dbname = 'bitdotio', 
+                 host = 'db.bit.io',
+                 port = 5432,
+                 user = 'name',
+                 password = Sys.getenv("BITIO_PASS2"))
+
+neiss <- in_schema("bitdotio/neiss", "neiss_2016_2020")
+hd <- in_schema("bitdotio/neiss", "injuries_near_holidays")
+
+neiss_agg_year_hday <- con %>%
+  tbl(neiss) %>%
+  select(CPSC_Case_Number, Treatment_Date, Product_1, Weight) %>%
+  mutate(ind_day = (month(Treatment_Date)==7 & day(Treatment_Date)==4)) %>%
+  #group_by(as.factor(ind_day), Product_1) %>%
+  #summarise(weighted = sum(Weight), n=n()) %>%
+  collect()
+
+write_csv(neiss_agg_year_hday, "./j4_prods.csv")
+
+data <- read.csv("./j4_prods.csv")
+
+df <- data %>%
+  group_by(ind_day = as.factor(ind_day), Product_1) %>%
+  summarise(weighted = sum(Weight), n=n()) %>%
+  group_by(ind_day) %>%
+  mutate(avg = weighted/sum(weighted))
+
+
+
+indday <- df %>%
+  filter(ind_day=="TRUE") %>%
+  arrange(desc(weighted)) %>%
+  slice_head(n=20)
+
+notind <- df %>%
+  filter(ind_day=="FALSE") %>%
+  arrange(desc(weighted)) %>%
+  slice_head(n=20)
+
+combined = rbind(indday, notind)
+prods = combined$Product_1
+combined = filter(df, Product_1 %in% prods)
+
+combined$Product_1 = str_to_title(combined$Product_1)
+combined$unique = FALSE
+
+combined$prod = str_replace(combined$Product_1, "\\(.*\\)", "Equipment")
+
+combined <- combined %>%
+  mutate(prod2 = case_when(
+    prod == "All Terrain Vehicles Atv Equipment" ~ "ATV Equipment",
+    prod == "Basketball, Activity And Related Equipment" ~ "Basketball Equipment",
+    prod == "Beds Or Bedframes, Other Or Not Specified" ~ "Beds or Bedframes",
+    prod == "Bicycles And Accessories, Equipment" ~ "Bicycles and Accessories",
+    prod == "Ceilings And Walls Equipment" ~  "Ceilings and Walls",
+    prod == "Chairs, Other Or Not Specified" ~ "Chairs",
+    prod == "Doors, Other Or Not Specified" ~ "Doors",
+    prod == "Floors Or Flooring Materials" ~ "Floors and Flooring Materials",
+    prod == "Knives, Not Elsewhere Classified" ~ "Knives",
+    prod == "Ladders, Other Or Not Specified" ~ "Ladders",
+    prod == "Porches, Balconies, Open-Side Floors Or Floor Openings" ~ "Porches and Balconies",
+    prod == "Skateboards, Unpowered Or Unspecified" ~ "Skateboards",
+    prod == "Swimming Pools, Not Specified" ~ "Swimming Pools",
+    prod == "Tables (Excl.  Baby Changing Tables, Billiard Or Pool Tables" ~ "Tables",
+    prod == "Sofas, Couches, Davenports, Divans Or Studio Couches" ~ "Sofas and Couches",
+    TRUE ~ prod
+  ))
+
+hl = c("Fireworks", "Swimming Equipment", "ATV Equipment", "Fishing Equipment",
+       "Swimming Pools")
+combined$unique[combined$prod2 %in% hl] = TRUE
+
+combined$day[combined$ind_day=="TRUE"] = "Independence Day"
+combined$day[combined$ind_day!="TRUE"] = "Other Days"
+
+
+ggplot(combined) +
+  geom_col(aes(x=avg, y=reorder(prod2, avg), fill=unique)) +
+  facet_wrap(facets = day ~ .) +
+  scale_x_continuous(label=percent, n.breaks = 6) +
+  #scale_y_discrete(name=NULL) +
+  scale_fill_manual(values = c(BLUE, GOLD)) +
+  ggtitle("How July 4 is Different") +
+  xlab("Percentage of Injuries") +
+  ylab("Top Products Associated with Injuries") +
+  labs(caption = "Yellow Bars represent products associated significantly more strongly with Independence Day injuries") +
+  theme_light() +
+  theme(
+    axis.text.x = element_text(size = 7, family = "Iosevka Term", face = "bold"),
+    axis.text.y = element_text(size = 7, family = "Iosevka Term", face = "bold"),
+    axis.title = element_text(size = 8, family = "Roboto", face = "bold", color="#8F8F8F"),
+    plot.title = element_text(family="Roboto Slab", size = 14, face="bold", hjust=0.5),
+    plot.caption.position = "plot",
+    plot.caption = element_text(hjust = 0.1, family = "Iosevka Term", size=8),
+    plot.subtitle = element_text(family = "Roboto", color="#8F8F8F", face="bold", size = 6),
+    legend.position = "None",
+    strip.text = element_text(family="Iosevka Term", face="bold")
+  )
+
+ggsave(filename = "./fig4_j4diff.png", dpi=300, width = 6, height=4, units = "in", device="png")
+
+```
+
+# rolling avg
+
+```{r}
+
+
+ra <- data %>%
+  mutate(trt_year = as.factor(year(Treatment_Date)),
+         doy = yday(Treatment_Date)) %>%
+  group_by(doy) %>%
+  summarise(weighted = sum(Weight), n=n())
+```
+
+
+
