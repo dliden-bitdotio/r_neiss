@@ -6,8 +6,7 @@ injuries. Unfortunately, data can only be downloaded in separate files
 for each year, and the codebook defining e.g. locations, injuries, and
 products can be difficult to use.
 
-This script downloads the specified years of data and returns an
-analysis-ready CSV file.
+These scripts (`process_holidays` and `process_neiss`) downloads\s the specified years of data and returns analysis-ready files.
 
 Even more useful: data for 2016-2020 are available for use on
 [bit.io](https://bit.io/bitdotio/neiss/).
