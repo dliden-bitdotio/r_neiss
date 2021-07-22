@@ -210,7 +210,9 @@ pand$CommonDate <- as.Date(paste0("2000-", format(pand$doy, format="%j")), "%Y-%
 ggplot(data = pand,
        mapping = aes(x = CommonDate, y = weighted, color = trt_year, fill=trt_year)) +
   geom_point(alpha = 0.4, size = 0.5) +
-  geom_smooth(size=0.5, alpha = 0.1, method = "gam", span = 1, level = 0.99) +
+  geom_smooth(size=0.5, alpha = 0.1, method = "gam", span = 1, level = 0.99,
+              #formula=y ~ s(x, bs = "cs")
+              ) +
   scale_x_date(labels = function(x) format(x, "%b"), date_breaks = "1 month", expand = c(0,0)) +
   scale_y_continuous(labels = comma) +
   scale_color_manual(values = c(RED, BLUE, GOLD, GREEN, PINK), name=NULL) +
